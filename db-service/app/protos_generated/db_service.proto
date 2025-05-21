@@ -1,0 +1,151 @@
+syntax = "proto3";
+
+package dbservice;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+service DatabaseService {
+    // User Profile Operations
+    rpc CreateUserProfile (UserProfileRequest) returns (UserProfileResponse);
+    rpc GetUserProfile (GetRequest) returns (UserProfileResponse);
+    rpc UpdateUserProfile (UserProfileRequest) returns (UserProfileResponse);
+    rpc DeleteUserProfile (GetRequest) returns (DeleteResponse);
+
+    // User Settings Operations
+    rpc CreateUserSettings (UserSettingsRequest) returns (UserSettingsResponse);
+    rpc GetUserSettings (GetRequest) returns (UserSettingsResponse);
+    rpc UpdateUserSettings (UserSettingsRequest) returns (UserSettingsResponse);
+    rpc DeleteUserSettings (GetRequest) returns (DeleteResponse);
+
+    // Event Operations
+    rpc CreateEvent (EventRequest) returns (EventResponse);
+    rpc GetEvent (GetRequest) returns (EventResponse);
+    rpc UpdateEvent (EventRequest) returns (EventResponse);
+    rpc DeleteEvent (GetRequest) returns (DeleteResponse);
+    rpc ListEvents (ListEventsRequest) returns (ListEventsResponse);
+
+    // AI Suggestion Operations
+    rpc CreateAiSuggestion (AiSuggestionRequest) returns (AiSuggestionResponse);
+    rpc GetAiSuggestion (GetRequest) returns (AiSuggestionResponse);
+    rpc UpdateAiSuggestion (AiSuggestionRequest) returns (AiSuggestionResponse);
+    rpc DeleteAiSuggestion (GetRequest) returns (DeleteResponse);
+    rpc ListAiSuggestions (ListAiSuggestionsRequest) returns (ListAiSuggestionsResponse);
+}
+
+// Common Messages
+message GetRequest {
+    string id = 1;
+}
+
+message DeleteResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+// User Profile Messages
+message UserProfileRequest {
+    string id = 1;
+    string display_name = 2;
+    string email = 3;
+    string role = 4;
+    string school = 5;
+    google.protobuf.Struct preferences = 6;
+    string bio = 7;
+    string avatar_url = 8;
+    google.protobuf.Timestamp created_at = 9;
+    google.protobuf.Timestamp updated_at = 10;
+}
+
+message UserProfileResponse {
+    UserProfileRequest profile = 1;
+    string message = 2;
+}
+
+// User Settings Messages
+message UserSettingsRequest {
+    string id = 1;
+    string study_mode = 2;
+    string academic_year = 3;
+    google.protobuf.Struct notification_preferences = 4;
+    bool ai_suggestions_enabled = 5;
+    bool blockchain_verify_display_enabled = 6;
+    string default_reminder_time = 7;
+    google.protobuf.Timestamp updated_at = 8;
+}
+
+message UserSettingsResponse {
+    UserSettingsRequest settings = 1;
+    string message = 2;
+}
+
+// Event Messages
+message EventResourceRequest {
+    bool ai_recommended = 1;
+    bool verified_on_chain = 2;
+    string priority = 3;
+    string category = 4;
+    string location = 5;
+    google.protobuf.Struct recurrence = 6;
+}
+
+message EventRequest {
+    string id = 1;
+    string user_id = 2;
+    string title = 3;
+    google.protobuf.Timestamp start = 4;
+    google.protobuf.Timestamp end = 5;
+    bool all_day = 6;
+    EventResourceRequest resource = 7;
+    string description = 8;
+    google.protobuf.Timestamp created_at = 9;
+    google.protobuf.Timestamp updated_at = 10;
+}
+
+message EventResponse {
+    EventRequest event = 1;
+    string message = 2;
+}
+
+message ListEventsRequest {
+    string user_id = 1;
+    google.protobuf.Timestamp start_date = 2;
+    google.protobuf.Timestamp end_date = 3;
+}
+
+message ListEventsResponse {
+    repeated EventRequest events = 1;
+    string message = 2;
+}
+
+// AI Suggestion Messages
+message AiSuggestionRequest {
+    string id = 1;
+    string user_id = 2;
+    string description = 3;
+    string status = 4;
+    string context = 5;
+    int32 priority = 6;
+    google.protobuf.Struct feedback = 7;
+    string proposed_title = 8;
+    google.protobuf.Timestamp proposed_start = 9;
+    google.protobuf.Timestamp proposed_end = 10;
+    float confidence_score = 11;
+    string reason = 12;
+    google.protobuf.Timestamp created_at = 13;
+}
+
+message AiSuggestionResponse {
+    AiSuggestionRequest suggestion = 1;
+    string message = 2;
+}
+
+message ListAiSuggestionsRequest {
+    string user_id = 1;
+    string status = 2;
+}
+
+message ListAiSuggestionsResponse {
+    repeated AiSuggestionRequest suggestions = 1;
+    string message = 2;
+}

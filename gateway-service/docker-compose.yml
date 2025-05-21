@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  gateway:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_SERVICE_HOST=db-service
+      - DB_SERVICE_PORT=50051
+    depends_on:
+      - db-service
+    networks:
+      - flikor-network
+
+networks:
+  flikor-network:
+    external: true

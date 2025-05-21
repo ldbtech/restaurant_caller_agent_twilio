@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package twilio;
+
+import "google/protobuf/timestamp.proto";
+// ---------- Message Definitions ----------
+
+// Customer says something -> we send to RAG
+message RAGRequest {
+  string session_id = 1;
+  string customer_text = 2;
+  repeated ConversationTurn history = 3;
+}
+
+// RAG replies back with text
+message RAGResponse {
+  string session_id = 1;
+  string ai_text = 2;
+  google.protobuf.Timestamp timestamp = 3;
+}
+
+// A single message in the conversation (AI or Customer)
+message ConversationTurn {
+  string role = 1; // "customer" or "ai"
+  string text = 2;
+  google.protobuf.Timestamp timestamp = 3;
+}
+
+// CallSession
+message CallSession {
+  string session_id = 1;
+  string call_sid = 2;
+  string from_number = 3;
+  string to_number = 4;
+  google.protobuf.Timestamp start_time = 5;
+  google.protobuf.Timestamp end_time = 6;
+  string status = 7; // "in-progress", "completed"
+}
+
+// ---------- Service Definition ----------
+
+service TwilioService {
+  // Twilio calls this when customer says something
+  rpc SendCustomerText (RAGRequest) returns (RAGResponse);
+}

@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: twilio-service
+spec:
+  selector:
+    app: twilio-service
+  type: NodePort
+  ports:
+    - protocol: TCP
+      port: 8000         # this is what you curl
+      targetPort: 8080   # this must match the container port (Uvicorn)

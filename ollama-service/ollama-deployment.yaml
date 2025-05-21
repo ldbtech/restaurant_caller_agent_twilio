@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  labels:
+    app: ollama
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+    spec:
+      containers:
+        - name: ollama
+          image: ollama/ollama
+          ports:
+            - containerPort: 11434
+          volumeMounts:
+            - mountPath: /root/.ollama
+              name: ollama-data
+          resources:
+            limits:
+              memory: "6Gi"
+            requests:
+              memory: "6Gi"
+      volumes:
+        - name: ollama-data
+          emptyDir: {} # for persistent.

@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: twilio-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: twilio-service
+  template:
+    metadata:
+      labels:
+        app: twilio-service
+    spec:
+      containers:
+        - name: twilio-service
+          image: alildb/twilio-service:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: LLM_GRPC_HOST
+              value: "llm-service"
+            - name: LLM_GRPC_PORT
+              value: "8080"
