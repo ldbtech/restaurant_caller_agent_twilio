@@ -1,0 +1,28 @@
+# Ignore Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore virtual environments
+.venv/
+env/
+venv/
+
+# Ignore git and metadata
+.git/
+.gitignore
+
+# Ignore local environment configs
+.env*
+*.log
+
+# Ignore test files and data (you don’t need tests in the final image)
+tests/
+app/tests/
+app/tests/menus/
+
+# Ignore any large cached files
+*.cache
+*.db
+*.sqlite

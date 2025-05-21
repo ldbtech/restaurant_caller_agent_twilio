@@ -1,0 +1,57 @@
+Welcome to Yemma Restaurant 🍔
+
+BURGERS
+- Classic Yemma Burger - $5.99
+  Juicy beef patty, lettuce, tomato, pickles, and Yemma's special sauce on a toasted bun.
+
+- Spicy Chicken Crunch - $6.49
+  Crispy chicken breast, spicy mayo, lettuce, and jalapeños.
+
+- Veggie Delight - $5.49
+  Grilled veggie patty, avocado, lettuce, tomato, and onion.
+
+SIDES
+- Golden Fries (Small / Medium / Large) - $2.49 / $2.99 / $3.49
+  Perfectly crispy and seasoned.
+
+- Cheesy Nuggets (6pc / 10pc) - $3.99 / $5.99
+  Melted cheddar inside a crunchy golden shell.
+
+- Onion Rings - $3.49
+  Thick-cut and fried until golden brown.
+
+DRINKS
+- Fountain Drink (Soda / Lemonade / Iced Tea) - $1.99
+  Free refills with any meal combo.
+
+- Bottled Water - $1.49
+
+- Yemma Shake (Vanilla / Chocolate / Strawberry) - $3.99
+  Thick, creamy, and made with real ice cream.
+
+DESSERTS
+- Soft-Serve Ice Cream - $1.99
+  Vanilla cone with optional chocolate dip.
+
+- Choco Lava Cake - $3.49
+  Warm chocolate cake with a gooey center.
+
+- Apple Pie Pocket - $2.49
+  Flaky pastry filled with sweet spiced apple.
+
+COMBOS
+- Classic Combo - $8.99
+  Yemma Burger, Medium Fries, and Fountain Drink.
+
+- Spicy Chicken Combo - $9.49
+  Spicy Chicken Crunch, Medium Fries, and Yemma Shake.
+
+- Kids Meal - $5.49
+  Mini Burger or Nuggets, Small Fries, and Juice Box.
+
+---
+
+Hours:
+Mon–Sun: 10:00 AM – 11:00 PM
+
+Thank you for choosing Yemma! 🎉

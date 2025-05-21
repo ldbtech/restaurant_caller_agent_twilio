@@ -1,0 +1,18 @@
+    firebase-admin==6.2.0
+    # requirements.txt
+
+    # Google Cloud and gRPC Libraries
+    grpcio~=1.64.0
+    grpcio-tools~=1.64.0
+    # grpcio-status will be handled as a dependency
+
+    # Protobuf related libraries
+    protobuf>=4.25.0,<6.0.0dev
+    proto-plus~=1.26.1
+
+    # Your application-specific dependencies
+    pydantic==2.4.2
+    python-dotenv==1.0.0
+
+    # Add any other direct dependencies your project has below
+    
