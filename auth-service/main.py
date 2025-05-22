@@ -6,7 +6,8 @@ from pathlib import Path
 # Add both the project root and app directory to Python path
 project_root = Path(__file__).parent
 app_dir = project_root / "app"
-sys.path.extend([str(project_root), str(app_dir)])
+proto_dir = app_dir / "proto"
+sys.path.extend([str(project_root), str(app_dir), str(proto_dir)])
 
 # Configure logging
 logging.basicConfig(

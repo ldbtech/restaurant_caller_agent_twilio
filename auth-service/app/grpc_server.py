@@ -35,13 +35,17 @@ from jose import jwt
 from passlib.context import CryptContext
 from grpc import ServicerContext
 from app.services.auth_service import AuthService
-from app.proto import auth_pb2, auth_pb2_grpc
+from app.proto import auth_service_pb2, auth_service_pb2_grpc
 from app.core.config import settings
+
+# Add the 'app' directory to sys.path
+app_dir = Path(__file__).parent
+sys.path.append(str(app_dir))
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-class AuthServiceServicer(auth_pb2_grpc.AuthServicer):
+class AuthServiceServicer(auth_service_pb2_grpc.AuthServiceServicer):
     """
     gRPC servicer for authentication service.
     
@@ -84,23 +88,23 @@ class AuthServiceServicer(auth_pb2_grpc.AuthServicer):
         self.encryption_key = settings.ENCRYPTION_KEY
         self.cipher_suite = Fernet(self.encryption_key)
 
-    async def Authenticate(self, request: auth_pb2.AuthRequest, context: ServicerContext) -> auth_pb2.AuthResponse:
+    async def Authenticate(self, request: auth_service_pb2.LoginRequest, context: ServicerContext) -> auth_service_pb2.AuthResponse:
         """
         Handle user authentication.
         
         Args:
-            request (auth_pb2.AuthRequest): Authentication request
+            request (auth_service_pb2.LoginRequest): Authentication request
             context (ServicerContext): gRPC context
             
         Returns:
-            auth_pb2.AuthResponse: Authentication response
+            auth_service_pb2.AuthResponse: Authentication response
         """
         try:
             # Validate request
             if not self._validate_auth_request(request):
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                 context.set_details('Invalid request parameters')
-                return auth_pb2.AuthResponse()
+                return auth_service_pb2.AuthResponse()
             
             # Authenticate user
             user, token = await self.auth_service.authenticate_user(request.email, request.password)
@@ -108,156 +112,89 @@ class AuthServiceServicer(auth_pb2_grpc.AuthServicer):
             if not user or not token:
                 context.set_code(grpc.StatusCode.UNAUTHENTICATED)
                 context.set_details('Invalid credentials')
-                return auth_pb2.AuthResponse()
+                return auth_service_pb2.AuthResponse()
             
-            return auth_pb2.AuthResponse(
-                user=auth_pb2.User(
-                    id=user.id,
-                    email=user.email,
-                    display_name=user.display_name,
-                    photo_url=user.photo_url,
-                    is_active=user.is_active,
-                    is_verified=user.is_verified
-                ),
-                access_token=token
+            return auth_service_pb2.AuthResponse(
+                access_token=token,
+                user_id=user.id,
+                email=user.email,
+                display_name=user.display_name,
+                role=user.role
             )
             
         except Exception as e:
             logger.error(f"Authentication failed: {str(e)}")
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details('Internal server error')
-            return auth_pb2.AuthResponse()
+            return auth_service_pb2.AuthResponse()
 
-    async def VerifyToken(self, request: auth_pb2.TokenRequest, context: ServicerContext) -> auth_pb2.User:
+    async def ValidateToken(self, request: auth_service_pb2.ValidateTokenRequest, context: ServicerContext) -> auth_service_pb2.ValidateTokenResponse:
         """
         Verify a token and return the user.
         
         Args:
-            request (auth_pb2.TokenRequest): Token verification request
+            request (auth_service_pb2.ValidateTokenRequest): Token verification request
             context (ServicerContext): gRPC context
             
         Returns:
-            auth_pb2.User: User information
+            auth_service_pb2.ValidateTokenResponse: Token validation response
         """
         try:
             user = await self.auth_service.verify_token(request.token)
             
             if not user:
-                context.set_code(grpc.StatusCode.UNAUTHENTICATED)
-                context.set_details('Invalid token')
-                return auth_pb2.User()
+                return auth_service_pb2.ValidateTokenResponse(
+                    is_valid=False,
+                    error_message="Invalid token"
+                )
             
-            return auth_pb2.User(
-                id=user.id,
-                email=user.email,
-                display_name=user.display_name,
-                photo_url=user.photo_url,
-                is_active=user.is_active,
-                is_verified=user.is_verified
+            return auth_service_pb2.ValidateTokenResponse(
+                is_valid=True,
+                user_id=user.id,
+                claims={"email": user.email, "role": user.role}
             )
             
         except Exception as e:
             logger.error(f"Token verification failed: {str(e)}")
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details('Internal server error')
-            return auth_pb2.User()
+            return auth_service_pb2.ValidateTokenResponse(
+                is_valid=False,
+                error_message=str(e)
+            )
 
-    async def RefreshToken(self, request: auth_pb2.TokenRequest, context: ServicerContext) -> auth_pb2.TokenResponse:
+    async def RefreshToken(self, request: auth_service_pb2.RefreshTokenRequest, context: ServicerContext) -> auth_service_pb2.AuthResponse:
         """
         Refresh an access token.
         
         Args:
-            request (auth_pb2.TokenRequest): Token refresh request
+            request (auth_service_pb2.RefreshTokenRequest): Token refresh request
             context (ServicerContext): gRPC context
             
         Returns:
-            auth_pb2.TokenResponse: New access token
+            auth_service_pb2.AuthResponse: New authentication response
         """
         try:
-            token = await self.auth_service.refresh_token(request.token)
+            token = await self.auth_service.refresh_token(request.refresh_token)
             
             if not token:
                 context.set_code(grpc.StatusCode.UNAUTHENTICATED)
                 context.set_details('Invalid refresh token')
-                return auth_pb2.TokenResponse()
+                return auth_service_pb2.AuthResponse()
             
-            return auth_pb2.TokenResponse(access_token=token)
+            return auth_service_pb2.AuthResponse(access_token=token)
             
         except Exception as e:
             logger.error(f"Token refresh failed: {str(e)}")
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details('Internal server error')
-            return auth_pb2.TokenResponse()
+            return auth_service_pb2.AuthResponse()
 
-    async def VerifyOAuthToken(self, request: auth_pb2.OAuthRequest, context: ServicerContext) -> auth_pb2.AuthResponse:
-        """
-        Verify an OAuth2 token and return the user and access token.
-        
-        Args:
-            request (auth_pb2.OAuthRequest): OAuth token verification request
-            context (ServicerContext): gRPC context
-            
-        Returns:
-            auth_pb2.AuthResponse: Authentication response
-        """
-        try:
-            user, token = await self.auth_service.verify_oauth_token(request.provider, request.token)
-            
-            if not user or not token:
-                context.set_code(grpc.StatusCode.UNAUTHENTICATED)
-                context.set_details('Invalid OAuth token')
-                return auth_pb2.AuthResponse()
-            
-            return auth_pb2.AuthResponse(
-                user=auth_pb2.User(
-                    id=user.id,
-                    email=user.email,
-                    display_name=user.display_name,
-                    photo_url=user.photo_url,
-                    is_active=user.is_active,
-                    is_verified=user.is_verified
-                ),
-                access_token=token
-            )
-            
-        except Exception as e:
-            logger.error(f"OAuth token verification failed: {str(e)}")
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details('Internal server error')
-            return auth_pb2.AuthResponse()
 
-    async def GetOAuthUrl(self, request: auth_pb2.OAuthUrlRequest, context: ServicerContext) -> auth_pb2.OAuthUrlResponse:
-        """
-        Get OAuth2 authorization URL for the specified provider.
-        
-        Args:
-            request (auth_pb2.OAuthUrlRequest): OAuth URL request
-            context (ServicerContext): gRPC context
-            
-        Returns:
-            auth_pb2.OAuthUrlResponse: OAuth2 authorization URL
-        """
-        try:
-            url = self.auth_service.get_oauth_url(request.provider)
-            return auth_pb2.OAuthUrlResponse(url=url)
-            
-        except ValueError as e:
-            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details(str(e))
-            return auth_pb2.OAuthUrlResponse()
-            
-        except Exception as e:
-            logger.error(f"Failed to get OAuth URL: {str(e)}")
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details('Internal server error')
-            return auth_pb2.OAuthUrlResponse()
-
-    def _validate_auth_request(self, request: auth_pb2.AuthRequest) -> bool:
+    def _validate_auth_request(self, request: auth_service_pb2.LoginRequest) -> bool:
         """
         Validate authentication request parameters.
         
         Args:
-            request (auth_pb2.AuthRequest): Authentication request
+            request (auth_service_pb2.LoginRequest): Authentication request
             
         Returns:
             bool: True if request is valid, False otherwise
@@ -346,7 +283,7 @@ def serve():
     )
     
     # Add the servicer
-    auth_pb2_grpc.add_AuthServicer_to_server(
+    auth_service_pb2_grpc.add_AuthServiceServicer_to_server(
         AuthServiceServicer(), server
     )
     

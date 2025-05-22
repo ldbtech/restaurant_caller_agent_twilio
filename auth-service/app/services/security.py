@@ -1,6 +1,7 @@
 import logging
 from typing import Dict, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
+from jose import jwt
 from app.services.redis_handler import RedisHandler
 from app.core.config import settings
 
@@ -33,35 +34,37 @@ class Security:
             bool: True if within limits, False otherwise
         """
         try:
-            current = self.redis_handler.get(key)
+            current = self.redis_handler.redis.get(key)
             if current is None:
-                self.redis_handler.setex(key, window, "1")
+                self.redis_handler.redis.setex(key, window, "1")
                 return True
                 
-            current = int(current)
-            if current >= limit:
+            count = int(current)
+            if count >= limit:
                 return False
                 
-            self.redis_handler.incr(key)
+            self.redis_handler.redis.incr(key)
             return True
         except Exception as e:
             logger.error(f"Rate limit check failed: {str(e)}")
             return False
 
-    def log_security_event(self, event_type: str, event_data: dict) -> None:
+    def log_security_event(self, event_type: str, event_data: Dict) -> bool:
         """
-        Log security events with proper sanitization.
+        Log a security event.
         
         Args:
-            event_type (str): Type of security event
-            event_data (dict): Event data to log
+            event_type (str): Type of event
+            event_data (Dict): Event data
+            
+        Returns:
+            bool: True if successful, False otherwise
         """
         try:
-            sanitized_data = self._sanitize_log_data(event_data)
-            logger.info(f"Security Event - {event_type}: {sanitized_data}")
-            self.redis_handler.log_security_event(event_type, sanitized_data)
+            return self.redis_handler.log_security_event(event_type, event_data)
         except Exception as e:
             logger.error(f"Failed to log security event: {str(e)}")
+            return False
 
     def _sanitize_log_data(self, data: Dict) -> Dict:
         """
@@ -119,27 +122,30 @@ class Security:
             ip (str): IP address to check
             
         Returns:
-            bool: True if IP is not blacklisted, False otherwise
+            bool: True if not blacklisted, False otherwise
         """
         try:
-            return not self.redis_handler.sismember("blacklisted_ips", ip)
+            return not self.redis_handler.redis.exists(f"blacklisted_ips:{ip}")
         except Exception as e:
             logger.error(f"IP blacklist check failed: {str(e)}")
-            return True  # Allow request if check fails
+            return False
 
-    def add_to_ip_blacklist(self, ip: str, duration: int = 3600) -> None:
+    def add_to_ip_blacklist(self, ip: str, duration: int) -> bool:
         """
         Add an IP to the blacklist.
         
         Args:
             ip (str): IP address to blacklist
-            duration (int): Duration in seconds (default: 1 hour)
+            duration (int): Blacklist duration in seconds
+            
+        Returns:
+            bool: True if successful, False otherwise
         """
         try:
-            self.redis_handler.setex(f"blacklisted_ips:{ip}", duration, "1")
-            self.log_security_event("ip_blacklisted", {"ip": ip, "duration": duration})
+            return self.redis_handler.redis.setex(f"blacklisted_ips:{ip}", duration, "1")
         except Exception as e:
-            logger.error(f"Failed to blacklist IP: {str(e)}")
+            logger.error(f"Failed to add IP to blacklist: {str(e)}")
+            return False
 
     def check_token_blacklist(self, token: str) -> bool:
         """
@@ -149,24 +155,71 @@ class Security:
             token (str): Token to check
             
         Returns:
-            bool: True if token is not blacklisted, False otherwise
+            bool: True if not blacklisted, False otherwise
         """
         try:
-            return not self.redis_handler.sismember("blacklisted_tokens", token)
+            return not self.redis_handler.redis.exists(f"blacklisted_tokens:{token}")
         except Exception as e:
             logger.error(f"Token blacklist check failed: {str(e)}")
-            return True  # Allow request if check fails
+            return False
 
-    def add_to_token_blacklist(self, token: str, duration: int = 86400) -> None:
+    def add_to_token_blacklist(self, token: str, duration: int) -> bool:
         """
         Add a token to the blacklist.
         
         Args:
             token (str): Token to blacklist
-            duration (int): Duration in seconds (default: 24 hours)
+            duration (int): Blacklist duration in seconds
+            
+        Returns:
+            bool: True if successful, False otherwise
         """
         try:
-            self.redis_handler.setex(f"blacklisted_tokens:{token}", duration, "1")
-            self.log_security_event("token_blacklisted", {"token": token[:10] + "..."})
+            return self.redis_handler.redis.setex(f"blacklisted_tokens:{token}", duration, "1")
         except Exception as e:
-            logger.error(f"Failed to blacklist token: {str(e)}") 
+            logger.error(f"Failed to add token to blacklist: {str(e)}")
+            return False
+
+    def create_access_token(self, user_id: str) -> str:
+        """
+        Create an access token.
+        
+        Args:
+            user_id (str): User ID
+            
+        Returns:
+            str: JWT access token
+        """
+        try:
+            expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+            to_encode = {
+                "sub": str(user_id),
+                "exp": expire,
+                "type": "access"
+            }
+            return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+        except Exception as e:
+            logger.error(f"Failed to create access token: {str(e)}")
+            raise
+
+    def create_refresh_token(self, user_id: str) -> str:
+        """
+        Create a refresh token.
+        
+        Args:
+            user_id (str): User ID
+            
+        Returns:
+            str: JWT refresh token
+        """
+        try:
+            expire = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+            to_encode = {
+                "sub": str(user_id),
+                "exp": expire,
+                "type": "refresh"
+            }
+            return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+        except Exception as e:
+            logger.error(f"Failed to create refresh token: {str(e)}")
+            raise 

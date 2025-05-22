@@ -13,13 +13,13 @@ from app.services.auth_service import AuthService
 @pytest.fixture
 def mock_redis():
     """Mock Redis client."""
-    with patch('redis.Redis') as mock:
+    with patch('app.services.redis_handler.redis.Redis') as mock:
         yield mock
 
 @pytest.fixture
 def mock_firebase():
     """Mock Firebase Admin SDK."""
-    with patch('firebase_admin.auth') as mock:
+    with patch('app.services.auth_service.firebase_admin.auth') as mock:
         yield mock
 
 @pytest.fixture
@@ -49,7 +49,8 @@ def test_user_data():
         "email": "test@example.com",
         "password": "Test123!@#",
         "display_name": "Test User",
-        "role": "student"
+        "role": "student",
+        "token": "test_token"
     }
 
 @pytest.fixture
@@ -58,5 +59,6 @@ def test_token_data():
     return {
         "access_token": "test_access_token",
         "refresh_token": "test_refresh_token",
-        "user_id": "test_user_id"
+        "user_id": "test_user_id",
+        "token": "test_token"
     } 

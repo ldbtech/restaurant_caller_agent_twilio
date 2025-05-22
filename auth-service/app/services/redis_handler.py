@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import redis
 import logging
 from functools import wraps
+from enum import Enum
 from app.core.config import settings
 import json
 from typing import Optional, Dict, Any
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 def check_redist_initialized(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if self.client is None:
+        if self.redis is None:
             logging.error("Redis client not initialized")
             raise Exception("Redis client not initialized")
         return func(self, *args, **kwargs)
@@ -22,50 +23,20 @@ class RedisErrorCode(Enum):
     REDIS_TOKEN_NOT_FOUND = 1001
 
 class RedisHandler:
-    """
-    Redis handler for managing Redis operations.
-    """
+    """Redis handler for managing tokens and security events."""
+    
     def __init__(self):
-        """Initialize Redis client based on environment."""
-        try:
-            if settings.REDIS_MODE == "production":
-                # Production mode - Redis Cloud
-                if not all([settings.REDIS_CLOUD_URL, settings.REDIS_CLOUD_USERNAME, settings.REDIS_CLOUD_PASSWORD]):
-                    raise ValueError("Redis Cloud credentials are required in production mode")
-                
-                self.client = redis.Redis.from_url(
-                    settings.REDIS_CLOUD_URL,
-                    username=settings.REDIS_CLOUD_USERNAME,
-                    password=settings.REDIS_CLOUD_PASSWORD,
-                    decode_responses=True,
-                    ssl=True
-                )
-                logger.info("Connected to Redis Cloud in production mode")
-            else:
-                # Local development mode
-                self.client = redis.Redis(
-                    host=settings.REDIS_HOST,
-                    port=settings.REDIS_PORT,
-                    db=settings.REDIS_DB,
-                    password=settings.REDIS_PASSWORD,
-                    decode_responses=True
-                )
-                logger.info("Connected to local Redis in development mode")
-            
-            # Test connection
-            self.client.ping()
-            
-        except redis.ConnectionError as e:
-            logger.error(f"Failed to connect to Redis: {str(e)}")
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error initializing Redis: {str(e)}")
-            raise
+        self.redis = redis.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB,
+            decode_responses=True
+        )
 
     def get(self, key: str) -> str:
         """Get a value from Redis."""
         try:
-            return self.client.get(key)
+            return self.redis.get(key)
         except Exception as e:
             logger.error(f"Failed to get value: {str(e)}")
             return None
@@ -73,7 +44,8 @@ class RedisHandler:
     def setex(self, key: str, expiry: int, value: str) -> bool:
         """Set a value in Redis with expiry."""
         try:
-            return self.client.setex(key, expiry, value)
+            self.redis.setex(key, expiry, value)
+            return True
         except Exception as e:
             logger.error(f"Failed to set value: {str(e)}")
             return False
@@ -81,7 +53,7 @@ class RedisHandler:
     def incr(self, key: str) -> int:
         """Increment a value in Redis."""
         try:
-            return self.client.incr(key)
+            return self.redis.incr(key)
         except Exception as e:
             logger.error(f"Failed to increment value: {str(e)}")
             return 0
@@ -89,7 +61,7 @@ class RedisHandler:
     def lpush(self, key: str, value: str) -> int:
         """Push a value to the left of a list."""
         try:
-            return self.client.lpush(key, value)
+            return self.redis.lpush(key, value)
         except Exception as e:
             logger.error(f"Failed to push value: {str(e)}")
             return 0
@@ -97,7 +69,8 @@ class RedisHandler:
     def ltrim(self, key: str, start: int, end: int) -> bool:
         """Trim a list to the specified range."""
         try:
-            return self.client.ltrim(key, start, end)
+            self.redis.ltrim(key, start, end)
+            return True
         except Exception as e:
             logger.error(f"Failed to trim list: {str(e)}")
             return False
@@ -105,7 +78,7 @@ class RedisHandler:
     def sismember(self, key: str, value: str) -> bool:
         """Check if a value is a member of a set."""
         try:
-            return self.client.sismember(key, value)
+            return self.redis.sismember(key, value)
         except Exception as e:
             logger.error(f"Failed to check set membership: {str(e)}")
             return False
@@ -113,7 +86,7 @@ class RedisHandler:
     def sadd(self, key: str, value: str) -> int:
         """Add a value to a set."""
         try:
-            return self.client.sadd(key, value)
+            return self.redis.sadd(key, value)
         except Exception as e:
             logger.error(f"Failed to add to set: {str(e)}")
             return 0
@@ -121,88 +94,139 @@ class RedisHandler:
     def delete(self, key: str) -> int:
         """Delete a key from Redis."""
         try:
-            return self.client.delete(key)
+            return self.redis.delete(key)
         except Exception as e:
             logger.error(f"Failed to delete key: {str(e)}")
             return 0
 
     def log_security_event(self, event_type: str, event_data: Dict[str, Any]) -> bool:
-        """Log a security event to Redis."""
+        """
+        Log a security event to Redis.
+        
+        Args:
+            event_type (str): Type of event
+            event_data (Dict[str, Any]): Event data
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
         try:
-            # Redact sensitive information
-            redacted_data = self._redact_sensitive_data(event_data)
-            
-            # Create event log entry
-            log_entry = {
+            event = {
                 "type": event_type,
-                "timestamp": str(datetime.now()),
-                "data": redacted_data
+                "data": self._redact_sensitive_data(event_data),
+                "timestamp": datetime.utcnow().isoformat()
             }
-            
-            # Store in Redis list
-            self.client.lpush("security_events", json.dumps(log_entry))
-            # Keep only last 1000 events
-            self.client.ltrim("security_events", 0, 999)
-            return True
+            return bool(self.redis.lpush("security_events", json.dumps(event)))
         except Exception as e:
-            logger.error(f"Error logging security event: {str(e)}")
+            logger.error(f"Failed to log security event: {str(e)}")
             return False
 
     def store_token(self, key: str, token: str, expiry: int) -> bool:
-        """Store a token in Redis."""
+        """
+        Store a token in Redis.
+        
+        Args:
+            key (str): Key to store token under
+            token (str): Token to store
+            expiry (int): Expiry time in seconds
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
         try:
-            return self.client.setex(key, expiry, token)
+            return self.redis.setex(key, expiry, token)
         except Exception as e:
-            logger.error(f"Error storing token: {str(e)}")
+            logger.error(f"Failed to store token: {str(e)}")
             return False
 
     def get_token(self, key: str) -> Optional[str]:
-        """Get a token from Redis."""
+        """
+        Get a token from Redis.
+        
+        Args:
+            key (str): Key to get token for
+            
+        Returns:
+            Optional[str]: Token if found, None otherwise
+        """
         try:
-            return self.client.get(key)
+            return self.redis.get(key)
         except Exception as e:
-            logger.error(f"Error getting token: {str(e)}")
+            logger.error(f"Failed to get token: {str(e)}")
             return None
 
     def delete_token(self, key: str) -> bool:
-        """Delete a token from Redis."""
+        """
+        Delete a token from Redis.
+        
+        Args:
+            key (str): Key to delete
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
         try:
-            return bool(self.client.delete(key))
+            return bool(self.redis.delete(key))
         except Exception as e:
-            logger.error(f"Error deleting token: {str(e)}")
+            logger.error(f"Failed to delete token: {str(e)}")
             return False
 
-    def store_refresh_token(self, user_id: str, refresh_token_id: str) -> bool:
-        """Store a refresh token in Redis."""
+    def store_refresh_token(self, user_id: str, token_id: str) -> bool:
+        """
+        Store a refresh token in Redis.
+        
+        Args:
+            user_id (str): User ID
+            token_id (str): Token ID
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
         try:
             key = f"refresh_tokens:{user_id}"
             data = {
-                "token_id": refresh_token_id,
-                "created_at": str(datetime.now()),
-                "expires_at": str(datetime.now() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS))
+                "token_id": token_id,
+                "created_at": datetime.utcnow().isoformat(),
+                "expires_at": (datetime.utcnow() + timedelta(days=30)).isoformat()
             }
-            return self.client.hset(key, mapping=data)
+            return bool(self.redis.hset(key, mapping=data))
         except Exception as e:
-            logger.error(f"Error storing refresh token: {str(e)}")
+            logger.error(f"Failed to store refresh token: {str(e)}")
             return False
 
     def get_refresh_token(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """Get a refresh token from Redis."""
+        """
+        Get a refresh token from Redis.
+        
+        Args:
+            user_id (str): User ID
+            
+        Returns:
+            Optional[Dict[str, Any]]: Token data if found, None otherwise
+        """
         try:
             key = f"refresh_tokens:{user_id}"
-            data = self.client.hgetall(key)
+            data = self.redis.hgetall(key)
             return data if data else None
         except Exception as e:
-            logger.error(f"Error getting refresh token: {str(e)}")
+            logger.error(f"Failed to get refresh token: {str(e)}")
             return None
 
     def delete_refresh_token(self, user_id: str) -> bool:
-        """Delete a refresh token from Redis."""
+        """
+        Delete a refresh token from Redis.
+        
+        Args:
+            user_id (str): User ID
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
         try:
             key = f"refresh_tokens:{user_id}"
-            return bool(self.client.delete(key))
+            return bool(self.redis.delete(key))
         except Exception as e:
-            logger.error(f"Error deleting refresh token: {str(e)}")
+            logger.error(f"Failed to delete refresh token: {str(e)}")
             return False
 
     def _redact_sensitive_data(self, data: Dict[str, Any]) -> Dict[str, Any]:

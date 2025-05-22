@@ -29,12 +29,11 @@ import redis
 from jose import jwt
 from passlib.context import CryptContext
 from app.services.oauth import OAuth2Service
-from app.models.user import User
+from app.models.auth_models import UserInfoResponse as User
 from app.core.config import settings
-from app.core.security import create_access_token, create_refresh_token
+from .security import Security
 from app.services.redis_handler import RedisHandler
 from app.services.token_management import TokenManagement
-from app.services.security import Security
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -133,8 +132,8 @@ class AuthService:
             auth.set_custom_user_claims(user.uid, {"role": role})
 
             # Create custom tokens
-            access_token = auth.create_custom_token(user.uid)
-            refresh_token = auth.create_custom_token(user.uid, {"refresh": True})
+            access_token = self.security.create_access_token(user.uid)
+            refresh_token = self.security.create_refresh_token(user.uid)
 
             # Log successful registration
             self.security.log_security_event("user_registered", {
@@ -175,7 +174,7 @@ class AuthService:
             user = auth.get_user_by_email(email)
             
             # Create custom tokens
-            access_token = auth.create_custom_token(user.uid)
+            access_token = self.security.create_access_token(user.uid)
             
             # Log successful login
             self.security.log_security_event("user_logged_in", {
@@ -247,7 +246,7 @@ class AuthService:
                 raise ValueError('Invalid refresh token')
                 
             # Create new access token
-            return auth.create_custom_token(decoded_token['uid'])
+            return self.security.create_access_token(decoded_token['uid'])
             
         except Exception as e:
             logger.error(f"Token refresh failed: {str(e)}")
@@ -424,4 +423,58 @@ class AuthService:
         if not self.security.validate_email(email):
             raise ValueError("Invalid email format.")
         # Password reset logic here
-        self.security.log_security_event("password_reset_requested", {"email": email}) 
+        self.security.log_security_event("password_reset_requested", {"email": email})
+
+    async def login(self, token: str) -> Tuple[Optional[User], Optional[str]]:
+        """
+        Login a user with a token.
+        
+        Args:
+            token (str): Authentication token
+            
+        Returns:
+            Tuple[Optional[User], Optional[str]]: User object and access token if successful,
+                                                (None, None) otherwise
+        """
+        try:
+            # Verify the token
+            user = await self.verify_token(token)
+            if not user:
+                return None, None
+                
+            # Create new access token
+            access_token = self.security.create_access_token(user.id)
+            
+            # Log successful login
+            self.security.log_security_event("user_logged_in", {
+                "user_id": user.id,
+                "email": user.email
+            })
+            
+            return user, access_token
+            
+        except Exception as e:
+            logger.error(f"Login failed: {str(e)}")
+            return None, None
+
+    async def verify_authentication(self, token: str) -> Optional[User]:
+        """
+        Verify authentication token and return user.
+        
+        Args:
+            token (str): Authentication token
+            
+        Returns:
+            Optional[User]: User object if token is valid, None otherwise
+        """
+        try:
+            # Check if token is blacklisted
+            if not self.security.check_token_blacklist(token):
+                return None
+                
+            # Verify the token
+            return await self.verify_token(token)
+            
+        except Exception as e:
+            logger.error(f"Authentication verification failed: {str(e)}")
+            return None 

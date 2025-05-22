@@ -1,118 +1,121 @@
-"""
-Unit tests for main Auth Service.
-"""
 import pytest
 from unittest.mock import Mock, patch
 from app.services.auth_service import AuthService
+from app.models.auth_models import UserInfoResponse
+from firebase_admin import auth
+from firebase_admin.auth import UserRecord
 
-def test_login_success(auth_service, test_user_data, mock_firebase):
-    """Test successful login."""
-    # Mock Firebase authentication
-    mock_firebase.verify_id_token.return_value = test_user_data
+@pytest.fixture
+def mock_firebase_auth():
+    """Mock Firebase Auth."""
+    with patch('firebase_admin.auth') as mock:
+        yield mock
+
+@pytest.fixture
+def mock_redis():
+    """Mock Redis client."""
+    with patch('redis.Redis') as mock:
+        yield mock
+
+@pytest.fixture
+def auth_service(mock_firebase_auth, mock_redis):
+    """Create AuthService instance with mocked dependencies."""
+    return AuthService()
+
+def test_register_user(auth_service, mock_firebase_auth):
+    """Test user registration."""
+    # Mock Firebase user creation
+    mock_user = Mock(spec=UserRecord)
+    mock_user.uid = "test123"
+    mock_user.email = "test@example.com"
+    mock_user.display_name = "Test User"
+    mock_firebase_auth.create_user.return_value = mock_user
     
-    # Test login
-    result = auth_service.login(test_user_data['token'])
+    # Test registration
+    result = auth_service.register_user(
+        email="test@example.com",
+        password="Test123!@#",
+        display_name="Test User",
+        role="student"
+    )
     
-    assert result is not None
-    assert 'access_token' in result
-    assert 'refresh_token' in result
-    assert 'user' in result
+    assert result["user_id"] == "test123"
+    assert result["email"] == "test@example.com"
+    assert result["display_name"] == "Test User"
+    assert result["role"] == "student"
+    assert "access_token" in result
+    assert "refresh_token" in result
 
-def test_login_invalid_token(auth_service, mock_firebase):
-    """Test login with invalid token."""
-    # Mock Firebase authentication failure
-    mock_firebase.verify_id_token.side_effect = Exception("Invalid token")
+@pytest.mark.asyncio
+async def test_authenticate_user(auth_service, mock_firebase_auth):
+    """Test user authentication."""
+    # Mock Firebase user
+    mock_user = Mock(spec=UserRecord)
+    mock_user.uid = "test123"
+    mock_user.email = "test@example.com"
+    mock_user.display_name = "Test User"
+    mock_user.photo_url = None
+    mock_user.email_verified = True
+    mock_firebase_auth.get_user_by_email.return_value = mock_user
     
-    # Test login
-    result = auth_service.login("invalid_token")
-    assert result is None
-
-def test_refresh_token_success(auth_service, test_token_data):
-    """Test successful token refresh."""
-    # Mock token verification
-    with patch.object(auth_service.token_management, 'verify_token') as mock_verify:
-        mock_verify.return_value = test_token_data
-        result = auth_service.refresh_token(test_token_data['refresh_token'])
-        
-        assert result is not None
-        assert 'access_token' in result
-        assert 'refresh_token' in result
-
-def test_refresh_token_invalid(auth_service):
-    """Test token refresh with invalid token."""
-    # Mock token verification failure
-    with patch.object(auth_service.token_management, 'verify_token') as mock_verify:
-        mock_verify.return_value = None
-        result = auth_service.refresh_token("invalid_token")
-        assert result is None
-
-def test_logout_success(auth_service, mock_redis):
-    """Test successful logout."""
-    token = "test_token"
-    result = auth_service.logout(token)
+    # Test authentication
+    user, token = await auth_service.authenticate_user(
+        email="test@example.com",
+        password="Test123!@#"
+    )
     
-    assert result is True
-    # Verify token was revoked
-    mock_redis.setex.assert_called_once()
+    assert isinstance(user, UserInfoResponse)
+    assert user.id == "test123"
+    assert user.email == "test@example.com"
+    assert user.display_name == "Test User"
+    assert user.is_verified is True
+    assert token is not None
 
-def test_logout_failure(auth_service, mock_redis):
-    """Test logout failure."""
-    # Mock Redis error
-    mock_redis.setex.side_effect = Exception("Redis error")
+@pytest.mark.asyncio
+async def test_verify_token(auth_service, mock_firebase_auth):
+    """Test token verification."""
+    # Mock Firebase token verification
+    mock_firebase_auth.verify_id_token.return_value = {
+        "uid": "test123",
+        "email": "test@example.com"
+    }
     
-    result = auth_service.logout("test_token")
-    assert result is False
-
-def test_verify_authentication_success(auth_service, test_token_data):
-    """Test successful authentication verification."""
-    # Mock token verification
-    with patch.object(auth_service.token_management, 'verify_token') as mock_verify:
-        mock_verify.return_value = test_token_data
-        result = auth_service.verify_authentication(test_token_data['token'])
-        
-        assert result is not None
-        assert result == test_token_data
-
-def test_verify_authentication_failure(auth_service):
-    """Test authentication verification failure."""
-    # Mock token verification failure
-    with patch.object(auth_service.token_management, 'verify_token') as mock_verify:
-        mock_verify.return_value = None
-        result = auth_service.verify_authentication("invalid_token")
-        assert result is None
-
-def test_rate_limit_handling(auth_service, mock_redis):
-    """Test rate limit handling."""
-    # Mock rate limit exceeded
-    mock_redis.get.return_value = "6"  # Assuming limit is 5
+    # Mock Firebase user
+    mock_user = Mock(spec=UserRecord)
+    mock_user.uid = "test123"
+    mock_user.email = "test@example.com"
+    mock_user.display_name = "Test User"
+    mock_user.photo_url = None
+    mock_user.email_verified = True
+    mock_firebase_auth.get_user.return_value = mock_user
     
-    result = auth_service.login("test_token")
-    assert result is None
+    # Test token verification
+    user = await auth_service.verify_token("valid_token")
+    
+    assert isinstance(user, UserInfoResponse)
+    assert user.id == "test123"
+    assert user.email == "test@example.com"
+    assert user.display_name == "Test User"
+    assert user.is_verified is True
 
-def test_security_event_logging(auth_service, mock_redis):
-    """Test security event logging."""
-    # Test login attempt
-    auth_service.login("test_token")
+def test_get_user_profile(auth_service, mock_firebase_auth):
+    """Test getting user profile."""
+    # Mock Firebase user
+    mock_user = Mock(spec=UserRecord)
+    mock_user.uid = "test123"
+    mock_user.email = "test@example.com"
+    mock_user.display_name = "Test User"
+    mock_user.custom_claims = {"role": "student"}
+    mock_user.user_metadata.creation_timestamp = 1234567890
+    mock_user.user_metadata.last_sign_in_timestamp = 1234567890
+    mock_firebase_auth.get_user.return_value = mock_user
     
-    # Verify security event was logged
-    mock_redis.lpush.assert_called()
-    logged_data = mock_redis.lpush.call_args[0][1]
-    assert "login_attempt" in logged_data
-
-def test_error_handling(auth_service, mock_firebase, mock_redis):
-    """Test error handling in various scenarios."""
-    # Test Firebase error
-    mock_firebase.verify_id_token.side_effect = Exception("Firebase error")
-    result = auth_service.login("test_token")
-    assert result is None
+    # Test getting user profile
+    profile = auth_service.get_user_profile("test123")
     
-    # Test Redis error
-    mock_redis.setex.side_effect = Exception("Redis error")
-    result = auth_service.logout("test_token")
-    assert result is False
-    
-    # Test token management error
-    with patch.object(auth_service.token_management, 'verify_token') as mock_verify:
-        mock_verify.side_effect = Exception("Token error")
-        result = auth_service.verify_authentication("test_token")
-        assert result is None 
+    assert profile["user_id"] == "test123"
+    assert profile["email"] == "test@example.com"
+    assert profile["display_name"] == "Test User"
+    assert profile["role"] == "student"
+    assert "created_at" in profile
+    assert "updated_at" in profile 
