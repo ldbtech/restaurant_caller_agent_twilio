@@ -32,6 +32,9 @@ from app.services.oauth import OAuth2Service
 from app.models.user import User
 from app.core.config import settings
 from app.core.security import create_access_token, create_refresh_token
+from app.services.redis_handler import RedisHandler
+from app.services.token_management import TokenManagement
+from app.services.security import Security
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -57,77 +60,14 @@ class AuthService:
     def __init__(self):
         """Initialize the authentication service."""
         try:
-            self._initialize_redis()
-            self._initialize_security()
-            self._initialize_firebase()
+            self.redis_handler = RedisHandler()
+            self.token_management = TokenManagement()
+            self.security = Security()
             self.oauth_service = OAuth2Service()
             
         except Exception as e:
             logger.error(f"Error initializing AuthService: {str(e)}")
             raise
-
-    def _initialize_redis(self) -> None:
-        """Initialize Redis client for rate limiting and token storage."""
-        self.redis = redis.Redis(
-            host=settings.REDIS_HOST,
-            port=settings.REDIS_PORT,
-            db=settings.REDIS_DB,
-            password=settings.REDIS_PASSWORD,
-            ssl=settings.REDIS_SSL
-        )
-
-    def _initialize_security(self) -> None:
-        """Initialize security-related components."""
-        self.pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-        self.encryption_key = settings.ENCRYPTION_KEY
-        self.cipher_suite = Fernet(self.encryption_key)
-
-    def _initialize_firebase(self) -> None:
-        """Initialize Firebase Admin SDK."""
-        if not firebase_admin._apps:
-            cred = credentials.Certificate({
-                "type": "service_account",
-                "project_id": settings.FIREBASE_PROJECT_ID,
-                "private_key_id": settings.FIREBASE_PRIVATE_KEY_ID,
-                "private_key": settings.FIREBASE_PRIVATE_KEY.replace('\\n', '\n'),
-                "client_email": settings.FIREBASE_CLIENT_EMAIL,
-                "client_id": settings.FIREBASE_CLIENT_ID,
-                "auth_uri": settings.FIREBASE_AUTH_URI,
-                "token_uri": settings.FIREBASE_TOKEN_URI,
-                "auth_provider_x509_cert_url": settings.FIREBASE_AUTH_PROVIDER_X509_CERT_URL,
-                "client_x509_cert_url": settings.FIREBASE_CLIENT_X509_CERT_URL,
-                "universe_domain": settings.FIREBASE_UNIVERSE_DOMAIN
-            })
-            firebase_admin.initialize_app(cred)
-            logger.info("Firebase Admin SDK initialized successfully")
-
-    def _check_rate_limit(self, key: str, limit: int, window: int) -> bool:
-        """
-        Check if a request is within rate limits.
-        
-        Args:
-            key (str): Rate limit key
-            limit (int): Maximum number of requests allowed
-            window (int): Time window in seconds
-            
-        Returns:
-            bool: True if within limits, False otherwise
-        """
-        try:
-            current = self.redis.get(key)
-            if current is None:
-                self.redis.setex(key, window, 1)
-                return True
-                
-            current = int(current)
-            if current >= limit:
-                return False
-                
-            self.redis.incr(key)
-            return True
-        except Exception as e:
-            logger.error(f"Rate limit check failed: {str(e)}")
-            return False
 
     def _log_security_event(self, event_type: str, event_data: Dict) -> None:
         """
@@ -142,7 +82,7 @@ class AuthService:
             logger.info(f"Security Event - {event_type}: {sanitized_data}")
             
             # Store in Redis for audit trail
-            self.redis.lpush(
+            self.redis_handler.lpush(
                 "security_events",
                 str({
                     'timestamp': int(datetime.utcnow().timestamp()),
@@ -152,7 +92,7 @@ class AuthService:
             )
             
             # Trim the list to keep only last 1000 events
-            self.redis.ltrim("security_events", 0, 999)
+            self.redis_handler.ltrim("security_events", 0, 999)
         except Exception as e:
             logger.error(f"Failed to log security event: {str(e)}")
 
@@ -179,8 +119,7 @@ class AuthService:
     def register_user(self, email: str, password: str, display_name: str, role: str = "student") -> Dict:
         """Register a new user with rate limiting and security checks."""
         try:
-            # Check rate limit
-            if not self._check_rate_limit(f"register:{email}", 5, 3600):  # 5 attempts per hour
+            if not self.security.check_rate_limit(f"register:{email}", 5, 3600):
                 raise Exception("Too many registration attempts. Please try again later.")
 
             # Create user in Firebase Auth
@@ -198,7 +137,7 @@ class AuthService:
             refresh_token = auth.create_custom_token(user.uid, {"refresh": True})
 
             # Log successful registration
-            self._log_security_event("user_registered", {
+            self.security.log_security_event("user_registered", {
                 "user_id": user.uid,
                 "email": email,
                 "role": role
@@ -229,8 +168,7 @@ class AuthService:
                                                 (None, None) otherwise
         """
         try:
-            # Check rate limit
-            if not self._check_rate_limit(f"login:{email}", settings.MAX_LOGIN_ATTEMPTS, settings.LOCKOUT_DURATION):
+            if not self.security.check_rate_limit(f"login:{email}", settings.MAX_LOGIN_ATTEMPTS, settings.LOCKOUT_DURATION):
                 raise ValueError("Too many login attempts. Please try again later.")
 
             # Verify credentials with Firebase
@@ -240,7 +178,7 @@ class AuthService:
             access_token = auth.create_custom_token(user.uid)
             
             # Log successful login
-            self._log_security_event("user_logged_in", {
+            self.security.log_security_event("user_logged_in", {
                 "user_id": user.uid,
                 "email": email
             })
@@ -272,7 +210,7 @@ class AuthService:
         """
         try:
             # Check if token is blacklisted
-            if self.redis.sismember("blacklisted_tokens", token):
+            if self.redis_handler.sismember("blacklisted_tokens", token):
                 raise ValueError("Token has been revoked")
                 
             # Verify the token
@@ -368,7 +306,7 @@ class AuthService:
             user = auth.get_user(user_id)
             
             # Log profile access
-            self._log_security_event("profile_accessed", {
+            self.security.log_security_event("profile_accessed", {
                 "user_id": user_id,
                 "accessed_by": user_id  # In a real system, this would be the requesting user's ID
             })
@@ -410,7 +348,7 @@ class AuthService:
                 auth.set_custom_user_claims(user_id, current_claims)
 
             # Log profile update
-            self._log_security_event("profile_updated", {
+            self.security.log_security_event("profile_updated", {
                 "user_id": user_id,
                 "updated_fields": list(update_data.keys())
             })
@@ -427,11 +365,11 @@ class AuthService:
             auth.delete_user(user_id)
             
             # Clean up user data from Redis
-            self.redis.delete(f"user:{user_id}")
-            self.redis.delete(f"tokens:{user_id}")
+            self.redis_handler.delete(f"user:{user_id}")
+            self.redis_handler.delete(f"tokens:{user_id}")
             
             # Log user deletion
-            self._log_security_event("user_deleted", {
+            self.security.log_security_event("user_deleted", {
                 "user_id": user_id
             })
             
@@ -447,10 +385,10 @@ class AuthService:
             auth.revoke_refresh_tokens(token)
             
             # Add to blacklist in Redis
-            self.redis.sadd("blacklisted_tokens", token)
+            self.redis_handler.sadd("blacklisted_tokens", token)
             
             # Log token revocation
-            self._log_security_event("token_revoked", {
+            self.security.log_security_event("token_revoked", {
                 "token": token
             })
             
@@ -473,3 +411,17 @@ class AuthService:
         ts = timestamp_pb2.Timestamp()
         ts.FromDatetime(dt)
         return ts 
+
+    def delete_my_account(self, user_id: str):
+        # Delete account logic here
+        self.security.log_security_event("user_deleted", {"user_id": user_id})
+
+    def logout(self, user_id: str):
+        self.token_management.revoke_token(user_id)
+        self.security.log_security_event("user_logged_out", {"user_id": user_id})
+
+    def forgot_my_password(self, email: str):
+        if not self.security.validate_email(email):
+            raise ValueError("Invalid email format.")
+        # Password reset logic here
+        self.security.log_security_event("password_reset_requested", {"email": email}) 
