@@ -4,122 +4,146 @@ package authservice;
 
 import "google/protobuf/timestamp.proto";
 
+// AuthService provides authentication and user management functionality
 service AuthService {
-    // Authentication Operations
+    // Register creates a new user account
     rpc Register (RegisterRequest) returns (AuthResponse);
+    
+    // Login authenticates a user and returns access/refresh tokens
     rpc Login (LoginRequest) returns (AuthResponse);
+    
+    // RefreshToken generates new access and refresh tokens
     rpc RefreshToken (RefreshTokenRequest) returns (AuthResponse);
+    
+    // Logout invalidates the current session
     rpc Logout (LogoutRequest) returns (LogoutResponse);
     
-    // User Management
+    // GetUserProfile retrieves user information
     rpc GetUserProfile (GetUserRequest) returns (UserProfileResponse);
+    
+    // UpdateUserProfile updates user information
     rpc UpdateUserProfile (UpdateUserRequest) returns (UserProfileResponse);
+    
+    // DeleteUser removes a user account
     rpc DeleteUser (DeleteUserRequest) returns (DeleteUserResponse);
     
-    // Token Operations
+    // ValidateToken verifies if a token is valid
     rpc ValidateToken (ValidateTokenRequest) returns (ValidateTokenResponse);
+    
+    // RevokeToken invalidates a specific token
     rpc RevokeToken (RevokeTokenRequest) returns (RevokeTokenResponse);
 
-    // Health Check
+    // CheckHealth verifies if the service is operational
     rpc CheckHealth(HealthCheckRequest) returns (HealthCheckResponse) {}
 }
 
-// Authentication Messages
+// RegisterRequest contains information needed to create a new user account
 message RegisterRequest {
-    string email = 1;
-    string password = 2;
-    string display_name = 3;
-    string role = 4;
+    string email = 1;          // User's email address
+    string password = 2;       // User's password
+    string display_name = 3;   // User's display name
+    string role = 4;          // User's role (student, professor, admin)
 }
 
+// LoginRequest contains credentials for user authentication
 message LoginRequest {
-    string email = 1;
-    string password = 2;
+    string email = 1;     // User's email address
+    string password = 2;  // User's password
 }
 
+// RefreshTokenRequest contains the refresh token to generate new tokens
 message RefreshTokenRequest {
-    string refresh_token = 1;
+    string refresh_token = 1;  // Current refresh token
 }
 
+// LogoutRequest contains the access token to invalidate
 message LogoutRequest {
-    string access_token = 1;
+    string access_token = 1;  // Access token to invalidate
 }
 
+// LogoutResponse indicates the result of the logout operation
 message LogoutResponse {
-    bool success = 1;
-    string message = 2;
+    bool success = 1;    // Whether the logout was successful
+    string message = 2;  // Additional information about the operation
 }
 
-// User Profile Messages
+// GetUserRequest contains the user ID to retrieve
 message GetUserRequest {
-    string user_id = 1;
+    string user_id = 1;  // ID of the user to retrieve
 }
 
+// UpdateUserRequest contains the information to update a user's profile
 message UpdateUserRequest {
-    string user_id = 1;
-    string display_name = 2;
-    string email = 3;
-    string role = 4;
-    map<string, string> custom_claims = 5;
+    string user_id = 1;                    // ID of the user to update
+    string display_name = 2;               // New display name
+    string email = 3;                      // New email address
+    string role = 4;                       // New role
+    map<string, string> custom_claims = 5; // Additional user claims
 }
 
+// UserProfileResponse contains the user's profile information
 message UserProfileResponse {
-    string user_id = 1;
-    string email = 2;
-    string display_name = 3;
-    string role = 4;
-    map<string, string> custom_claims = 5;
-    google.protobuf.Timestamp created_at = 6;
-    google.protobuf.Timestamp updated_at = 7;
+    string user_id = 1;                    // User's unique ID
+    string email = 2;                      // User's email address
+    string display_name = 3;               // User's display name
+    string role = 4;                       // User's role
+    map<string, string> custom_claims = 5; // Additional user claims
+    google.protobuf.Timestamp created_at = 6;  // Account creation timestamp
+    google.protobuf.Timestamp updated_at = 7;  // Last update timestamp
 }
 
-// Token Messages
+// ValidateTokenRequest contains the token to validate
 message ValidateTokenRequest {
-    string token = 1;
+    string token = 1;  // Token to validate
 }
 
+// ValidateTokenResponse contains the validation result
 message ValidateTokenResponse {
-    bool is_valid = 1;
-    string user_id = 2;
-    map<string, string> claims = 3;
-    string error_message = 4;
+    bool is_valid = 1;                // Whether the token is valid
+    string user_id = 2;               // ID of the token owner
+    map<string, string> claims = 3;   // Token claims
+    string error_message = 4;         // Error message if validation failed
 }
 
+// RevokeTokenRequest contains the token to revoke
 message RevokeTokenRequest {
-    string token = 1;
+    string token = 1;  // Token to revoke
 }
 
+// RevokeTokenResponse indicates the result of the token revocation
 message RevokeTokenResponse {
-    bool success = 1;
-    string message = 2;
+    bool success = 1;    // Whether the revocation was successful
+    string message = 2;  // Additional information about the operation
 }
 
-// Common Response
+// AuthResponse contains authentication information
 message AuthResponse {
-    string access_token = 1;
-    string refresh_token = 2;
-    string user_id = 3;
-    string email = 4;
-    string display_name = 5;
-    string role = 6;
-    map<string, string> custom_claims = 7;
-    string error_message = 8;
+    string access_token = 1;           // JWT access token
+    string refresh_token = 2;          // JWT refresh token
+    string user_id = 3;                // User's unique ID
+    string email = 4;                  // User's email address
+    string display_name = 5;           // User's display name
+    string role = 6;                   // User's role
+    map<string, string> custom_claims = 7;  // Additional user claims
+    string error_message = 8;          // Error message if operation failed
 }
 
-// Delete User
+// DeleteUserRequest contains the user ID to delete
 message DeleteUserRequest {
-    string user_id = 1;
+    string user_id = 1;  // ID of the user to delete
 }
 
+// DeleteUserResponse indicates the result of the user deletion
 message DeleteUserResponse {
-    bool success = 1;
-    string message = 2;
+    bool success = 1;    // Whether the deletion was successful
+    string message = 2;  // Additional information about the operation
 }
 
-// Health Check Messages
+// HealthCheckRequest is an empty message for health checks
 message HealthCheckRequest {}
 
+// HealthCheckResponse contains the service health status
 message HealthCheckResponse {
-    string status = 1;  // SERVING, NOT_SERVING, UNKNOWN
-    string message = 2;
+    string status = 1;   // Service status (SERVING, NOT_SERVING, UNKNOWN)
+    string message = 2;  // Additional status information
 } 

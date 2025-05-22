@@ -1,18 +1,35 @@
-    firebase-admin==6.2.0
-    # requirements.txt
+# Core dependencies
+grpcio==1.60.0
+grpcio-tools==1.60.0
+grpcio-status==1.60.0
+protobuf==4.25.1
+firebase-admin==6.4.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+python-dotenv==1.0.0
 
-    # Google Cloud and gRPC Libraries
-    grpcio~=1.64.0
-    grpcio-tools~=1.64.0
-    # grpcio-status will be handled as a dependency
+# OAuth2 dependencies
+authlib==1.3.0
+httpx==0.26.0
+google-auth==2.27.0
+python-jose==3.3.0
+cryptography==42.0.2
 
-    # Protobuf related libraries
-    protobuf>=4.25.0,<6.0.0dev
-    proto-plus~=1.26.1
+# Development dependencies
+pytest==7.4.4
+pytest-asyncio==0.23.5
+pytest-cov==4.1.0
+black==24.1.1
+isort==5.13.2
+mypy==1.8.0
 
-    # Your application-specific dependencies
-    pydantic==2.4.2
-    python-dotenv==1.0.0
+# Protobuf related
+proto-plus==1.26.1
 
-    # Add any other direct dependencies your project has below
+# Application dependencies
+redis==5.0.1
+passlib[bcrypt]==1.7.4
+itsdangerous==2.1.2
+
+# Add any other direct dependencies your project has below
     

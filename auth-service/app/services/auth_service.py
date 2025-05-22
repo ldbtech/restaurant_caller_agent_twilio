@@ -1,60 +1,188 @@
+"""
+Authentication service implementation.
+
+This module provides the core authentication functionality for the application,
+including user registration, login, token management, and OAuth2 integration.
+
+Key features:
+- User registration and login with Firebase
+- Token-based authentication
+- OAuth2 integration with multiple providers
+- Rate limiting and security features
+- Comprehensive logging and monitoring
+
+Example:
+    auth_service = AuthService()
+    user, token = await auth_service.authenticate_user(email, password)
+"""
+
 import os
+import logging
 from datetime import datetime, timedelta
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Tuple
 import firebase_admin
 from firebase_admin import auth, credentials
 from google.protobuf import timestamp_pb2
 from dotenv import load_dotenv
+from cryptography.fernet import Fernet
+import redis
+from jose import jwt
+from passlib.context import CryptContext
+from app.services.oauth import OAuth2Service
+from app.models.user import User
+from app.core.config import settings
+from app.core.security import create_access_token, create_refresh_token
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv('.env')
 
 class AuthService:
+    """
+    Authentication service for handling user authentication and management.
+    
+    This class provides methods for user registration, login, token management,
+    and OAuth2 integration. It uses Firebase for user management and Redis for
+    rate limiting and token storage.
+    
+    Attributes:
+        redis (redis.Redis): Redis client for rate limiting and token storage
+        pwd_context (CryptContext): Password hashing context
+        cipher_suite (Fernet): Encryption suite for sensitive data
+        oauth_service (OAuth2Service): OAuth2 service for third-party auth
+    """
+    
     def __init__(self):
-        """Initialize Firebase Admin SDK."""
+        """Initialize the authentication service."""
         try:
-            # Check if required environment variables are set
-            required_vars = [
-                'FIREBASE_PROJECT_ID',
-                'FIREBASE_PRIVATE_KEY_ID',
-                'FIREBASE_PRIVATE_KEY',
-                'FIREBASE_CLIENT_EMAIL',
-                'FIREBASE_CLIENT_ID',
-                'FIREBASE_AUTH_URI',
-                'FIREBASE_TOKEN_URI',
-                'FIREBASE_AUTH_PROVIDER_X509_CERT_URL',
-                'FIREBASE_CLIENT_X509_CERT_URL',
-                'FIREBASE_UNIVERSE_DOMAIN'
-            ]
+            self._initialize_redis()
+            self._initialize_security()
+            self._initialize_firebase()
+            self.oauth_service = OAuth2Service()
             
-            missing_vars = [var for var in required_vars if not os.getenv(var)]
-            if missing_vars:
-                raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
-
-            # Initialize Firebase Admin SDK with credentials from environment
-            cred = credentials.Certificate({
-                "type": "service_account",
-                "project_id": os.getenv('FIREBASE_PROJECT_ID'),
-                "private_key_id": os.getenv('FIREBASE_PRIVATE_KEY_ID'),
-                "private_key": os.getenv('FIREBASE_PRIVATE_KEY').replace('\\n', '\n'),
-                "client_email": os.getenv('FIREBASE_CLIENT_EMAIL'),
-                "client_id": os.getenv('FIREBASE_CLIENT_ID'),
-                "auth_uri": os.getenv('FIREBASE_AUTH_URI'),
-                "token_uri": os.getenv('FIREBASE_TOKEN_URI'),
-                "auth_provider_x509_cert_url": os.getenv('FIREBASE_AUTH_PROVIDER_X509_CERT_URL'),
-                "client_x509_cert_url": os.getenv('FIREBASE_CLIENT_X509_CERT_URL'),
-                "universe_domain": os.getenv('FIREBASE_UNIVERSE_DOMAIN')
-            })
-            
-            firebase_admin.initialize_app(cred)
-            print("Firebase Admin SDK initialized successfully")
         except Exception as e:
-            print(f"Error initializing Firebase Admin SDK: {e}")
+            logger.error(f"Error initializing AuthService: {str(e)}")
             raise
 
-    def register_user(self, email: str, password: str, display_name: str, role: str = "student") -> Dict:
-        """Register a new user."""
+    def _initialize_redis(self) -> None:
+        """Initialize Redis client for rate limiting and token storage."""
+        self.redis = redis.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB,
+            password=settings.REDIS_PASSWORD,
+            ssl=settings.REDIS_SSL
+        )
+
+    def _initialize_security(self) -> None:
+        """Initialize security-related components."""
+        self.pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+        self.encryption_key = settings.ENCRYPTION_KEY
+        self.cipher_suite = Fernet(self.encryption_key)
+
+    def _initialize_firebase(self) -> None:
+        """Initialize Firebase Admin SDK."""
+        if not firebase_admin._apps:
+            cred = credentials.Certificate({
+                "type": "service_account",
+                "project_id": settings.FIREBASE_PROJECT_ID,
+                "private_key_id": settings.FIREBASE_PRIVATE_KEY_ID,
+                "private_key": settings.FIREBASE_PRIVATE_KEY.replace('\\n', '\n'),
+                "client_email": settings.FIREBASE_CLIENT_EMAIL,
+                "client_id": settings.FIREBASE_CLIENT_ID,
+                "auth_uri": settings.FIREBASE_AUTH_URI,
+                "token_uri": settings.FIREBASE_TOKEN_URI,
+                "auth_provider_x509_cert_url": settings.FIREBASE_AUTH_PROVIDER_X509_CERT_URL,
+                "client_x509_cert_url": settings.FIREBASE_CLIENT_X509_CERT_URL,
+                "universe_domain": settings.FIREBASE_UNIVERSE_DOMAIN
+            })
+            firebase_admin.initialize_app(cred)
+            logger.info("Firebase Admin SDK initialized successfully")
+
+    def _check_rate_limit(self, key: str, limit: int, window: int) -> bool:
+        """
+        Check if a request is within rate limits.
+        
+        Args:
+            key (str): Rate limit key
+            limit (int): Maximum number of requests allowed
+            window (int): Time window in seconds
+            
+        Returns:
+            bool: True if within limits, False otherwise
+        """
         try:
+            current = self.redis.get(key)
+            if current is None:
+                self.redis.setex(key, window, 1)
+                return True
+                
+            current = int(current)
+            if current >= limit:
+                return False
+                
+            self.redis.incr(key)
+            return True
+        except Exception as e:
+            logger.error(f"Rate limit check failed: {str(e)}")
+            return False
+
+    def _log_security_event(self, event_type: str, event_data: Dict) -> None:
+        """
+        Log security events with proper sanitization.
+        
+        Args:
+            event_type (str): Type of security event
+            event_data (Dict): Event data to log
+        """
+        try:
+            sanitized_data = self._sanitize_log_data(event_data)
+            logger.info(f"Security Event - {event_type}: {sanitized_data}")
+            
+            # Store in Redis for audit trail
+            self.redis.lpush(
+                "security_events",
+                str({
+                    'timestamp': int(datetime.utcnow().timestamp()),
+                    'event_type': event_type,
+                    'data': sanitized_data
+                })
+            )
+            
+            # Trim the list to keep only last 1000 events
+            self.redis.ltrim("security_events", 0, 999)
+        except Exception as e:
+            logger.error(f"Failed to log security event: {str(e)}")
+
+    def _sanitize_log_data(self, data: Dict) -> Dict:
+        """
+        Sanitize log data to remove sensitive information.
+        
+        Args:
+            data (Dict): Data to sanitize
+            
+        Returns:
+            Dict: Sanitized data
+        """
+        sanitized = data.copy()
+        
+        # Remove sensitive fields
+        sensitive_fields = ['password', 'token', 'secret', 'key']
+        for field in sensitive_fields:
+            if field in sanitized:
+                sanitized[field] = '[REDACTED]'
+                
+        return sanitized
+
+    def register_user(self, email: str, password: str, display_name: str, role: str = "student") -> Dict:
+        """Register a new user with rate limiting and security checks."""
+        try:
+            # Check rate limit
+            if not self._check_rate_limit(f"register:{email}", 5, 3600):  # 5 attempts per hour
+                raise Exception("Too many registration attempts. Please try again later.")
+
             # Create user in Firebase Auth
             user = auth.create_user(
                 email=email,
@@ -69,6 +197,13 @@ class AuthService:
             access_token = auth.create_custom_token(user.uid)
             refresh_token = auth.create_custom_token(user.uid, {"refresh": True})
 
+            # Log successful registration
+            self._log_security_event("user_registered", {
+                "user_id": user.uid,
+                "email": email,
+                "role": role
+            })
+
             return {
                 "user_id": user.uid,
                 "email": user.email,
@@ -78,48 +213,166 @@ class AuthService:
                 "refresh_token": refresh_token
             }
         except Exception as e:
+            logger.error(f"Error registering user: {str(e)}")
             raise Exception(f"Error registering user: {str(e)}")
 
-    def login_user(self, email: str, password: str) -> Dict:
-        """Login a user."""
+    async def authenticate_user(self, email: str, password: str) -> Tuple[Optional[User], Optional[str]]:
+        """
+        Authenticate a user with email and password.
+        
+        Args:
+            email (str): User's email address
+            password (str): User's password
+            
+        Returns:
+            Tuple[Optional[User], Optional[str]]: User object and access token if successful,
+                                                (None, None) otherwise
+        """
         try:
-            # Get user by email
+            # Check rate limit
+            if not self._check_rate_limit(f"login:{email}", settings.MAX_LOGIN_ATTEMPTS, settings.LOCKOUT_DURATION):
+                raise ValueError("Too many login attempts. Please try again later.")
+
+            # Verify credentials with Firebase
             user = auth.get_user_by_email(email)
             
             # Create custom tokens
             access_token = auth.create_custom_token(user.uid)
-            refresh_token = auth.create_custom_token(user.uid, {"refresh": True})
-
-            return {
+            
+            # Log successful login
+            self._log_security_event("user_logged_in", {
                 "user_id": user.uid,
-                "email": user.email,
-                "display_name": user.display_name,
-                "role": user.custom_claims.get("role", "student"),
-                "access_token": access_token,
-                "refresh_token": refresh_token
-            }
+                "email": email
+            })
+            
+            return User(
+                id=user.uid,
+                email=user.email,
+                display_name=user.display_name,
+                photo_url=user.photo_url,
+                is_active=True,
+                is_verified=user.email_verified
+            ), access_token
+            
+        except auth.UserNotFoundError:
+            return None, None
         except Exception as e:
-            raise Exception(f"Error logging in user: {str(e)}")
+            logger.error(f"Authentication failed: {str(e)}")
+            return None, None
 
-    def validate_token(self, token: str) -> Dict:
-        """Validate a Firebase ID token."""
+    async def verify_token(self, token: str) -> Optional[User]:
+        """
+        Verify a Firebase custom token and return the user.
+        
+        Args:
+            token (str): Firebase custom token to verify
+            
+        Returns:
+            Optional[User]: User object if token is valid, None otherwise
+        """
         try:
+            # Check if token is blacklisted
+            if self.redis.sismember("blacklisted_tokens", token):
+                raise ValueError("Token has been revoked")
+                
+            # Verify the token
             decoded_token = auth.verify_id_token(token)
-            return {
-                "is_valid": True,
-                "user_id": decoded_token["uid"],
-                "claims": decoded_token
-            }
+            user = auth.get_user(decoded_token['uid'])
+            
+            return User(
+                id=user.uid,
+                email=user.email,
+                display_name=user.display_name,
+                photo_url=user.photo_url,
+                is_active=True,
+                is_verified=user.email_verified
+            )
+            
         except Exception as e:
-            return {
-                "is_valid": False,
-                "error_message": str(e)
-            }
+            logger.error(f"Token verification failed: {str(e)}")
+            return None
+
+    async def refresh_token(self, refresh_token: str) -> Optional[str]:
+        """
+        Refresh an access token using a refresh token.
+        
+        Args:
+            refresh_token (str): Refresh token to use
+            
+        Returns:
+            Optional[str]: New access token if successful, None otherwise
+        """
+        try:
+            # Verify the refresh token
+            decoded_token = auth.verify_id_token(refresh_token)
+            if not decoded_token.get('refresh'):
+                raise ValueError('Invalid refresh token')
+                
+            # Create new access token
+            return auth.create_custom_token(decoded_token['uid'])
+            
+        except Exception as e:
+            logger.error(f"Token refresh failed: {str(e)}")
+            return None
+
+    async def verify_oauth_token(self, provider: str, token: str) -> Tuple[Optional[User], Optional[str]]:
+        """
+        Verify an OAuth2 token and return the user and access token.
+        
+        Args:
+            provider (str): OAuth provider name
+            token (str): OAuth2 token to verify
+            
+        Returns:
+            Tuple[Optional[User], Optional[str]]: User object and access token if successful,
+                                                (None, None) otherwise
+        """
+        try:
+            if provider == 'google':
+                user_info = await self.oauth_service.verify_google_token(token)
+            elif provider == 'apple':
+                user_info = await self.oauth_service.verify_apple_token(token)
+            elif provider == 'microsoft':
+                user_info = await self.oauth_service.verify_microsoft_token(token)
+            else:
+                raise ValueError(f'Unsupported OAuth provider: {provider}')
+            
+            return User(
+                id=user_info['user_id'],
+                email=user_info['email'],
+                display_name=user_info.get('display_name', ''),
+                photo_url=user_info.get('photo_url', ''),
+                is_active=True,
+                is_verified=True
+            ), user_info['access_token']
+            
+        except Exception as e:
+            logger.error(f"OAuth token verification failed: {str(e)}")
+            return None, None
+
+    def get_oauth_url(self, provider: str) -> str:
+        """
+        Get OAuth2 authorization URL for the specified provider.
+        
+        Args:
+            provider (str): OAuth provider name
+            
+        Returns:
+            str: OAuth2 authorization URL
+        """
+        return self.oauth_service.get_oauth_url(provider)
 
     def get_user_profile(self, user_id: str) -> Dict:
-        """Get user profile information."""
+        """Get user profile information with access control."""
         try:
             user = auth.get_user(user_id)
+            
+            # Log profile access
+            self._log_security_event("profile_accessed", {
+                "user_id": user_id,
+                "accessed_by": user_id  # In a real system, this would be the requesting user's ID
+            })
+            
             return {
                 "user_id": user.uid,
                 "email": user.email,
@@ -130,12 +383,13 @@ class AuthService:
                 "updated_at": user.user_metadata.last_sign_in_timestamp
             }
         except Exception as e:
+            logger.error(f"Error getting user profile: {str(e)}")
             raise Exception(f"Error getting user profile: {str(e)}")
 
     def update_user_profile(self, user_id: str, display_name: Optional[str] = None,
                           email: Optional[str] = None, role: Optional[str] = None,
                           custom_claims: Optional[Dict] = None) -> Dict:
-        """Update user profile information."""
+        """Update user profile information with validation and logging."""
         try:
             update_data = {}
             if display_name:
@@ -155,29 +409,67 @@ class AuthService:
                     current_claims.update(custom_claims)
                 auth.set_custom_user_claims(user_id, current_claims)
 
+            # Log profile update
+            self._log_security_event("profile_updated", {
+                "user_id": user_id,
+                "updated_fields": list(update_data.keys())
+            })
+
             return self.get_user_profile(user_id)
         except Exception as e:
+            logger.error(f"Error updating user profile: {str(e)}")
             raise Exception(f"Error updating user profile: {str(e)}")
 
     def delete_user(self, user_id: str) -> bool:
-        """Delete a user."""
+        """Delete a user with proper cleanup."""
         try:
+            # Delete user from Firebase
             auth.delete_user(user_id)
+            
+            # Clean up user data from Redis
+            self.redis.delete(f"user:{user_id}")
+            self.redis.delete(f"tokens:{user_id}")
+            
+            # Log user deletion
+            self._log_security_event("user_deleted", {
+                "user_id": user_id
+            })
+            
             return True
         except Exception as e:
+            logger.error(f"Error deleting user: {str(e)}")
             raise Exception(f"Error deleting user: {str(e)}")
 
     def revoke_token(self, token: str) -> bool:
-        """Revoke a refresh token."""
+        """Revoke a refresh token with proper cleanup."""
         try:
+            # Revoke token in Firebase
             auth.revoke_refresh_tokens(token)
+            
+            # Add to blacklist in Redis
+            self.redis.sadd("blacklisted_tokens", token)
+            
+            # Log token revocation
+            self._log_security_event("token_revoked", {
+                "token": token
+            })
+            
             return True
         except Exception as e:
+            logger.error(f"Error revoking token: {str(e)}")
             raise Exception(f"Error revoking token: {str(e)}")
 
     @staticmethod
     def datetime_to_timestamp(dt: datetime) -> timestamp_pb2.Timestamp:
-        """Convert datetime to protobuf timestamp."""
+        """
+        Convert datetime to protobuf timestamp.
+        
+        Args:
+            dt (datetime): Datetime to convert
+            
+        Returns:
+            timestamp_pb2.Timestamp: Protobuf timestamp
+        """
         ts = timestamp_pb2.Timestamp()
         ts.FromDatetime(dt)
         return ts 

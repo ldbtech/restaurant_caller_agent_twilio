@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package auth;
+
+service Auth {
+    // Basic authentication
+    rpc Authenticate(AuthRequest) returns (AuthResponse);
+    rpc VerifyToken(TokenRequest) returns (User);
+    rpc RefreshToken(TokenRequest) returns (TokenResponse);
+    
+    // OAuth2 authentication
+    rpc VerifyOAuthToken(OAuthRequest) returns (AuthResponse);
+    rpc GetOAuthUrl(OAuthUrlRequest) returns (OAuthUrlResponse);
+}
+
+message User {
+    string id = 1;
+    string email = 2;
+    string display_name = 3;
+    string photo_url = 4;
+    bool is_active = 5;
+    bool is_verified = 6;
+}
+
+message AuthRequest {
+    string email = 1;
+    string password = 2;
+}
+
+message AuthResponse {
+    User user = 1;
+    string access_token = 2;
+}
+
+message TokenRequest {
+    string token = 1;
+}
+
+message TokenResponse {
+    string access_token = 1;
+}
+
+message OAuthRequest {
+    string provider = 1;  // "google", "apple", or "microsoft"
+    string token = 2;
+}
+
+message OAuthUrlRequest {
+    string provider = 1;  // "google", "apple", or "microsoft"
+}
+
+message OAuthUrlResponse {
+    string url = 1;
+} 
