@@ -1,8 +1,8 @@
-# backend-flikor
+# backend-Risona
 
 ## Project Overview
 
-**backend-flikor** is a modular backend system composed of several microservices, each responsible for a specific domain of the application. The architecture is designed for scalability, maintainability, and ease of development.
+**backend-Risona** is a modular backend system composed of several microservices, each responsible for a specific domain of the application. The architecture is designed for scalability, maintainability, and ease of development.
 
 ---
 
