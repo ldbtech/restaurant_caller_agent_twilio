@@ -64,8 +64,7 @@ Contains deployment and service manifests for the Ollama LLM infrastructure (Kub
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/ldbtech/backend-flikor.git
-   cd backend-flikor
+   git clone https://github.com/ldbtech/restaurant_caller_agent_twilio.git
    ```
 2. **Python version:** Use Python 3.10+ (recommended: 3.12)
 3. **Create a virtual environment:**
@@ -100,4 +99,4 @@ Some services may require environment variables (see `.env` files or documentati
 
 ## Contact & Support
 
-For questions, open an issue on the [GitHub repository](https://github.com/ldbtech/backend-flikor) or contact the maintainers.
+For questions, open an issue on the [GitHub repository](https://github.com/ldbtech/restaurant_caller_agent_twilio.git) or contact the maintainers.
